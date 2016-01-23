@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+
+# Usage: rlwrap -S 'ims> ' ./ims
+
+require 'io/console'
+
+class String
+  def brown; "\e[33m#{self}\e[0m" end
+end
+
+def run mk, default
+  mk = mk + [default[:recipe]] unless default[:target] == 'noop'
+
+  IO.popen "make -f - #{default[:target]} 2>&1", "w+" do |fd|
+    fd.puts mk.join("\n")
+    fd.close_write
+    r = fd.read
+    puts r unless r =~ /make: Nothing to be done for 'noop'.\n/
+  end
+  $?.exitstatus
+end
+
+def dump mk
+  width = IO.console.winsize[1]
+  puts ("-" * width).brown
+  puts mk
+  puts ("-" * width).brown
+end
+
+def mk_def
+  [ "shellquote = '$(subst ','\\'',$(1))'", ".PHONY: noop\nnoop:" ]
+end
+
+def help
+  puts ". EXP           evaluate EXP and print the result"
+  puts ".dump           show tmp Makefile"
+  puts ".pwd            print working dir"
+  puts ".t NAME         run tmp Makefile with target NAME"
+  puts ".reset          clean tmp Makefile"
+end
+
+
+
+
+mk = mk_def
+line = ''
+
+while true do
+  begin
+    line = $stdin.gets.chomp
+  rescue NoMethodError, Interrupt # C-d, C-c
+    break
+  end
+
+  default = { target: 'noop' }
+
+  case line
+  when ".", ".help"
+    help
+    next
+  when ".dump"
+    dump mk
+    next
+  when ".pwd"
+    line = ". $(shell pwd)"
+  when /^.t (\S+)/
+    default[:target] = $1
+    line = ""
+  when ".reset"
+    mk = mk_def
+    dump mk
+    next
+  end
+
+  if line[0..1] == ". "
+    default = {
+      target: 'print',
+      recipe: ".PHONY: print\nprint:\n\t@echo $(call shellquote,#{line[2..-1]})"
+    }
+  else
+    mk.push line unless line =~ /^\s*$/
+  end
+
+  # erase last bogus line
+  mk.pop if 0 != run(mk, default) && default[:target] == 'noop'
+end
